@@ -745,50 +745,14 @@ cloud_set_downprogress_status(DW_STATUS status)
 int
 cloud_get_downprogress(progress_t *progp)
 {
-	char lpath[PATH_MAX] = {0}, tmpath[PATH_MAX] = {0};
-	struct stat statbuf;
-	int ret;
-	long long size;
-
 	if (!progp){
 		DPRINTF("progp is null\n");
 		return FAILURE;
 	}
 	pthread_mutex_lock(&m_down);
-	if(downprogress.invaild == 1){
-		DPRINTF("Invaild DownProgress Information, INGNORE....\n");
-		pthread_mutex_unlock(&m_down);
-		return FAILURE;		
-	}
-	ret = pcs_convert_path_to_local(downprogress.record.path, lpath);
-	if(ret == FAILURE){
-		DPRINTF("Convert PATH [%s] error\n", downprogress.record.path);
-		pthread_mutex_unlock(&m_down);
-		return FAILURE;
-	}
-	
-	size = strtoll(downprogress.record.size, NULL, 10);
-	if(size <= PCS_MULTI_DOWNLIMIT){
-		sprintf(tmpath, "%s%s", lpath, PCS_TMP_FILE);
-		if (access(tmpath, F_OK) == 0){
-			if(lstat(tmpath, &statbuf) == -1){
-				DPRINTF("%s stat:%s\n", tmpath, strerror(errno));
-				pthread_mutex_unlock(&m_down);
-				return FAILURE;
-			}
-		}else if(access(lpath, F_OK) == 0){
-			if(lstat(lpath, &statbuf) == -1){
-				DPRINTF("%s stat:%s\n", lpath, strerror(errno));
-				pthread_mutex_unlock(&m_down);
-				return FAILURE;
-			}		
-		}else{
-			statbuf.st_size= 0;
-		}
-		downprogress.now = statbuf.st_size;
-	}
 	downprogress.method = 1;
 	memcpy(progp, &downprogress, sizeof(progress_t));
+	printf("++++++++++++++++++++++++++++++++++Now-->%ldByte...\n", (long long)downprogress.now);
 	pthread_mutex_unlock(&m_down);
 
 	return SUCCESS;
@@ -1436,7 +1400,7 @@ int get_download_task(sqlite3  *db, rec_t *record)
 	pthread_mutex_lock(&m_down);
 	/*FILE*/
 	ret= sql_get_data_record(&qrecord, db, 
-		"SELECT * FROM DOWN WHERE DIR=0 AND STATUS=%d LIMIT 1", CLOUD_WAITING);
+		"SELECT * FROM DOWN WHERE STATUS='%d' OR STATUS='%d' LIMIT 1", CLOUD_ING, CLOUD_WAITING);
 	if(ret == FAILURE){
 		DPRINTF("Get DownLoad Task FILE error...\n");
 		goto exe_error;
@@ -2230,15 +2194,16 @@ void *thread_login(void *arg)
 		char errmsg[4096] = {0}, *pstr = NULL;
 		int errornum = 0;
 
-		strcpy(errmsg, pcs_strerror(context->pcs));
+		strcpy(errmsg, pcs_strerror(pcs));
 		printf("Login Failed: %s\n", errmsg);
 		
 		pstr = strstr(errmsg, "error: ");
 		if(pstr == NULL){
 			printf("Response Error, Not found error string\n");
 			state = LOGIN_FAILED;
+		}else{
+			errornum = atoi(pstr+strlen("error: "));
 		}
-		errornum = atoi(pstr+strlen("error: "));
 		if(errornum == 1 || errornum == 2){
 			state = LOGIN_BADUSER;
 		}else if(errornum == 4 || errornum == 120021 ||
@@ -3388,7 +3353,7 @@ int pcs_web_api_dlprog(int *dlnum, progress_t *record)
 		DPRINTF("Get Download Num Failed...\n");
 		return -1;
 	}
-	
+	*dlnum = num;
 	memset(record, 0, sizeof(progress_t));
 	ret = cloud_get_downprogress(record);
 	if(ret == FAILURE){
@@ -3509,13 +3474,38 @@ int pcs_web_api_getdata_record(rec_t *rectp, char *fmt, ...)
 int pcs_web_api_exesql(char *fmt, ...)
 {
 	int ret;
-
+	char *errMsg = NULL;
+	char *sql;
+	va_list ap;
+	
 	pthread_mutex_lock(&m_down);
-	ret = sql_exec(contexWeb.db,fmt);
+	if(contexWeb.db == NULL){
+		pthread_mutex_unlock(&m_down);
+		return -1;
+	}
+	va_start(ap, fmt);
+
+	sql = sqlite3_vmprintf(fmt, ap);
+	if(sql == NULL){
+		va_end(ap);
+		pthread_mutex_unlock(&m_down);
+		return -1;
+	}
+	ret = sqlite3_exec(contexWeb.db, sql, 0, 0, &errMsg);
+	if( ret != SQLITE_OK ){
+		printf("fail here SQL error %d [%s]\n%s\n", ret, errMsg, sql);
+		if (errMsg)
+			sqlite3_free(errMsg);
+
+		ret = -1;	
+	}
+	sqlite3_free(sql);
+	va_end(ap);
+	
 	pthread_mutex_unlock(&m_down);
 
 	
-	return (ret == SUCCESS?0:-1);
+	return (ret == -1?-1:0);
 }
 
 int pcs_web_api_dlprogress_interp(char *path)

@@ -1949,6 +1949,10 @@ OperationRecord(char *buffer, char *url, char *opt, int sockfd)
 	oper_cur = oper_list;
 	while(oper_cur){
 		DPRINTF("Operation Execute %s [opt=%s]\n", oper_cur->name, action);
+		if(oper_cur->name == NULL || strlen(oper_cur->name) == 0){
+			oper_cur = oper_cur->next;
+			continue;
+		}
 		if(optval >= CLOUD_WAITING){
 			/*Update to Waiting....*/
 			ret = pcs_web_api_exesql("UPDATE DOWN SET STATUS='%d' "
