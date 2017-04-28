@@ -97,7 +97,7 @@ static inline void pcs_http_prepare(struct pcs_http *http, enum HttpMethod metho
 	pcs_http_reset_response(http);
 	curl_easy_setopt(http->curl, CURLOPT_USERAGENT, http->usage ? http->usage : USAGE);
 	curl_easy_setopt(http->curl, CURLOPT_URL, url);
-	curl_easy_setopt(http->curl, CURLOPT_VERBOSE, 1L); /*add by zhangwei for debug*/
+//	curl_easy_setopt(http->curl, CURLOPT_VERBOSE, 1L); /*add by zhangwei for debug*/
 	switch(method)
 	{
 	case HTTP_METHOD_GET:
@@ -534,6 +534,7 @@ PCS_API void pcs_http_setopt(PcsHttp handle, PcsHttpOption opt, void *value)
 		break;
 	case PCS_HTTP_OPTION_PROGRESS_FUNCTION:
 		http->progress_func = (PcsHttpProgressCallback)value;
+		http->progress = 1;
 		break;
 	case PCS_HTTP_OPTION_PROGRESS_FUNCTION_DATE:
 		http->progress_data = value;
