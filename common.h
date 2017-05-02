@@ -128,6 +128,7 @@ int dm_daemon(const char *fname, const char *workdir);
 
 int already_running(char *pidfile);
 int handler_sig();
+int copyFile(const char *sourceFileNameWithPath, const char *targetFileNameWithPath);  
 
 
 

@@ -217,7 +217,7 @@ int ipc_pipe_init(char *path)
         DPRINTF("mkfifo fail, errno:%d, %s\n", errno, strerror(errno));
 		return -1;
 	}
-	if((fd = open(path, O_RDWR)) < 0){
+	if((fd = open(path, O_RDWR)) <= 0){
         DPRINTF("mkfifo open failed, errno:%d, %s\n", errno, strerror(errno));
 		return -1;
 	}
@@ -742,4 +742,40 @@ handler_sig()
 	return SUCCESS;
 
 }
+
+int copyFile(const char *sourceFileNameWithPath,  
+        const char *targetFileNameWithPath)  
+{  
+    FILE *fpR, *fpW;  
+    char buffer[4096];  
+    int lenR, lenW;  
+    if ((fpR = fopen(sourceFileNameWithPath, "r")) == NULL)  
+    {  
+        printf("The file '%s' can not be opened! \n", sourceFileNameWithPath);  
+        return FAILURE;  
+    }  
+    if ((fpW = fopen(targetFileNameWithPath, "w")) == NULL)  
+    {  
+        printf("The file '%s' can not be opened! \n", targetFileNameWithPath);  
+        fclose(fpR);  
+        return FAILURE;  
+    }  
+  
+    memset(buffer, 0, 4096);  
+    while ((lenR = fread(buffer, 1, 4096, fpR)) > 0)  
+    {  
+        if ((lenW = fwrite(buffer, 1, lenR, fpW)) != lenR)  
+        {  
+            printf("Write to file '%s' failed!\n", targetFileNameWithPath);  
+            fclose(fpR);  
+            fclose(fpW);  
+            return FAILURE;  
+        }  
+        memset(buffer, 0, 4096);  
+    }  
+  
+    fclose(fpR);  
+    fclose(fpW);  
+    return SUCCESS;  
+}  
 

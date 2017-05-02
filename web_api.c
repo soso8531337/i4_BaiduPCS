@@ -189,11 +189,12 @@ pthread_mutex_t m_mutex=PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t m_cond=PTHREAD_COND_INITIALIZER;
 
 pthread_mutex_t m_down=PTHREAD_MUTEX_INITIALIZER;
-
+pthread_mutex_t m_login=PTHREAD_MUTEX_INITIALIZER;
 
 static int networkStatus = 0;
 static int storageStatus = 0;
 static int downloadStart = 0;
+static volatile int loginState = 0;
 muti_taskinfo mTask[PCS_MULTI_DOWNNUM];
 static progress_t downprogress;
 
@@ -204,6 +205,7 @@ webContext contexWeb;
 
 static Pcs *create_pcs(webContext *context);
 static void destroy_pcs(Pcs *pcs);
+static int get_mutex_login(void);
 
 /*********************************************************************************/
 int
@@ -237,7 +239,7 @@ static int cookiefile(char *name, int size)
 {
 	memset(name, 0, size);
 	CreateDirectoryRecursive(PCS_DEFAULT_CONFIGDIR);
-	snprintf(name, size-1, "%s/default.cookie", "/tmp");
+	snprintf(name, size-1, "%s/default.cookie", PCS_DEFAULT_CONFIGDIR);
 
 	return 0;
 }
@@ -247,7 +249,7 @@ static int captchafile(char *name, int size)
 {
 	memset(name, 0, size);
 	CreateDirectoryRecursive(PCS_DEFAULT_CONFIGDIR);
-	snprintf(name, size-1, "%s/captcha.gif", PCS_DEFAULT_CONFIGDIR);
+	snprintf(name, size-1, "%s/captcha.gif", "/tmp");
 
 	return 0;
 }
@@ -2172,29 +2174,26 @@ void *thread_login(void *arg)
 	webContext *context = (webContext *)(arg);
 	PcsRes pcsres;
 	int state = LOGIN_FAILED;
-	Pcs *pcs = NULL;
 	
 	printf("Login Thread %d Start\n", pthread_self());
-	/*We need to renew pcs struct*/
-	pcs = create_pcs(context);
-	if(!pcs){
-		printf("Login Thread Create PCS Failed\n");		
-		state = LOGIN_FAILED;		
-		goto log_finish;
-	}
-	pcs_clone_userinfo(pcs, context->pcs);
 	
-	pcsres = pcs_login(pcs);
+	pcsres = pcs_login(context->pcs);
 	if(pcsres == PCS_OK){
-		/*We Neet to clone back*/
-		pcs_clone_userinfo(context->pcs, pcs);
-		printf("Login Success. UID: %s\n", pcs_sysUID(context->pcs));	
+		printf("Login Success. UID: %s\n", pcs_sysUID(context->pcs));
+		printf("Destory Login PCS Struct[Just for save cookie]!!!!\n");
+		destroy_pcs(context->pcs);
+		context->pcs = create_pcs(context);
+		if(!context->pcs){
+			printf("Login Thread Create PCS Failed\n");
+			state = LOGIN_FAILED;
+			goto log_finish;
+		}
 		state = LOGIN_OK;
 	}else{
 		char errmsg[4096] = {0}, *pstr = NULL;
 		int errornum = 0;
 
-		strcpy(errmsg, pcs_strerror(pcs));
+		strcpy(errmsg, pcs_strerror(context->pcs));
 		printf("Login Failed: %s\n", errmsg);
 		
 		pstr = strstr(errmsg, "error: ");
@@ -2216,11 +2215,13 @@ void *thread_login(void *arg)
 			state = LOGIN_FAILED;
 		}
 	}
-	printf("Destory Login PCS Struct[Just for save cookie]\n");
-	destroy_pcs(pcs);
+	printf("Login Thread Quit[state=%d]....\n", state);
 	
-log_finish:	
-	write(context->login_fd, &state, sizeof(state));
+log_finish:
+	if(get_mutex_login()){
+		printf("Notify To Phone..\n");
+		write(context->login_fd, &state, sizeof(state));
+	}
 	return NULL;
 }
 
@@ -2469,7 +2470,7 @@ static PcsBool verifycode(unsigned char *ptr, size_t size, char *captcha, size_t
     fd_set fdset, fderr;
     struct timeval tv;	
 	int rc, status = 0;
-
+	
 	savedfile = context->captchafile;
 
 	pf = fopen(savedfile, "wb");
@@ -2486,37 +2487,54 @@ static PcsBool verifycode(unsigned char *ptr, size_t size, char *captcha, size_t
 		printf("Notify To Client---->Need VerifyCode\n");
 	}
 	printf("The captcha image at %s.\nPlease input the captcha code: ", savedfile);
-verify_try:	
-	FD_ZERO(&fdset);
-	FD_SET(context->verify_fd, &fdset);
-	FD_SET(context->verify_fd, &fderr);
-	tv.tv_sec = 20;
-	tv.tv_usec = 0;
-	rc = select(context->verify_fd+1, &fdset, NULL, &fderr, &tv);
-	printf("select result=%d tv.tv_sec=%d\n", rc, tv.tv_sec);
-	if(rc == 0){
-		printf("Receive Verify Code Time out\n");
-		return PcsFalse;
-	}else if(rc == -1){
-		if(errno = EINTR){
-			goto verify_try;
-		}
-		printf("Receive Verify Code-->Select Error:%d\n", rc);
-		return PcsFalse;
-	}
-	if(FD_ISSET(context->verify_fd, &fderr) ||
-			!FD_ISSET(context->verify_fd, &fdset)){
-		printf("Receive Verify Code-->fderr Check or No read data\n");
-		return PcsFalse;
-	}
-	if(read(context->verify_fd, captcha, captchaSize) <= 0){
-		printf("Receive Verify Code-->Read Error:%s\n", strerror(errno));
-		return PcsFalse;
-	}
 
-	printf("Receive User Input Verify Code:%s\n", captcha);
-	
-	return PcsTrue;
+	while(1){
+		pthread_mutex_lock(&m_login);
+		if(!loginState){
+			printf("Cancel Input Veerify Code\n");
+			pthread_mutex_unlock(&m_login);
+			return PcsFalse;
+		}
+		FD_ZERO(&fdset);
+		FD_SET(context->verify_fd, &fdset);
+		FD_SET(context->verify_fd, &fderr);
+		tv.tv_sec = 1;
+		tv.tv_usec = 0;
+		rc = select(context->verify_fd+1, &fdset, NULL, &fderr, &tv);
+		printf("select result=%d tv.tv_sec=%d\n", rc, tv.tv_sec);
+		if(rc == 0){
+			printf("Receive Verify Code Time out\n");			
+			pthread_mutex_unlock(&m_login);
+			usleep(500000);
+			continue;
+		}else if(rc == -1){
+			if(errno = EINTR){				
+				usleep(500000);
+				pthread_mutex_unlock(&m_login);
+				continue;
+			}
+			printf("Receive Verify Code-->Select Error:%d\n", rc);			
+			pthread_mutex_unlock(&m_login);
+			return PcsFalse;
+		}
+		if(FD_ISSET(context->verify_fd, &fderr) ||
+				!FD_ISSET(context->verify_fd, &fdset)){
+			printf("Receive Verify Code-->fderr Check or No read data\n");			
+			pthread_mutex_unlock(&m_login);
+			return PcsFalse;
+		}
+		if(read(context->verify_fd, captcha, captchaSize) <= 0){
+			printf("Receive Verify Code-->Read Error:%s\n", strerror(errno));			
+			pthread_mutex_unlock(&m_login);
+			return PcsFalse;
+		}		
+		pthread_mutex_unlock(&m_login);
+		printf("Receive User Input Verify Code:%s\n", captcha);
+		return PcsTrue;
+	}
+	printf("Receive User Input Verify Code Cancel[%d]\n", loginState);
+
+	return PcsFalse;
 }
 
 static PcsBool input_str(const char *tips, char *value, size_t valueSize, void *state)
@@ -2531,7 +2549,7 @@ verify_try:
 	FD_ZERO(&fdset);
 	FD_SET(context->verify_fd, &fdset);
 	FD_SET(context->verify_fd, &fderr);
-	tv.tv_sec = 20;
+	tv.tv_sec = 2;
 	tv.tv_usec = 0;
 	rc = select(context->verify_fd+1, &fdset, NULL, &fderr, &tv);
 	printf("select result=%d tv.tv_sec=%d\n", rc, tv.tv_sec);
@@ -3039,7 +3057,11 @@ static int login_successful(webContext *context)
 {
 	int64_t quota, used;
 	char *bufdir;
-	
+
+	if(pcs_islogin(context->pcs) != PCS_LOGIN){
+		printf("We Check Again Found Baidu Not login\n");
+		return -1;
+	}	
 	pthread_mutex_lock(&m_mutex);	
 	context->islogin = 1;
 	init_database(context);
@@ -3068,6 +3090,27 @@ static int login_successful(webContext *context)
 	pthread_mutex_unlock(&m_mutex);
 
 	return 0;
+}
+
+static void set_mutex_login(int state)
+{	
+	printf("Begin Set m_login\n");
+	pthread_mutex_lock(&m_login);
+	loginState = state;
+	pthread_mutex_unlock(&m_login);	
+	printf("End Set m_login:%d\n", state);
+}
+
+static int get_mutex_login(void)
+{
+	int state = 0;
+	printf("Begin Get m_login\n");
+	pthread_mutex_lock(&m_login);
+	state = loginState;
+	pthread_mutex_unlock(&m_login);
+	printf("End Get m_login:%d\n", state);
+
+	return state;
 }
 
 /***************************************************************************/
@@ -3159,9 +3202,11 @@ int pcs_web_api_login(char *username, char *password, char *verifycode)
 		return -1;
 	}
 
+	set_mutex_login(0);
 	if(contexWeb.tlogin){
-		DPRINTF("Having Been Login, Please Wait....\n");
-		return -3;
+		DPRINTF("Having Been Login, Please Wait....\n");		
+		pthread_join(contexWeb.tlogin, NULL);
+		contexWeb.tlogin = 0;
 	}
 	pcsres = pcs_islogin(contexWeb.pcs);
 	if(pcsres == PCS_LOGIN){
@@ -3174,10 +3219,10 @@ int pcs_web_api_login(char *username, char *password, char *verifycode)
 			}
 		}
 		strcpy(contexWeb.username, pcs_sysUID(contexWeb.pcs));
-		contexWeb.islogin = 1;
+		contexWeb.islogin = 1;		
 		return 0;
 	}else if(pcsres != PCS_NOT_LOGIN){
-		DPRINTF("Something Error, We Not confirm if not login\n");
+		DPRINTF("Something Error, We Not confirm if not login\n");		
 		return -2;
 	}
 
@@ -3189,27 +3234,39 @@ int pcs_web_api_login(char *username, char *password, char *verifycode)
 		pcs_setopt(contexWeb.pcs, PCS_OPTION_PASSWORD, password);
 	}
 
+	set_mutex_login(1);
 	if(pthread_create(&contexWeb.tlogin, NULL, thread_login, (void*)&contexWeb)!= 0){
-		DPRINTF("Create Login Thread Failed[%s]\n", strerror(errno));
+		DPRINTF("Create Login Thread Failed[%s]\n", strerror(errno));		
+		set_mutex_login(0);
 		return -1;
 	}
 
 	if(read(contexWeb.login_fd, &state, sizeof(state)) <= 0){
-		DPRINTF("Read Login State Failed\n");
+		DPRINTF("Read Login State Failed\n");		
+		set_mutex_login(0);
 		return -1;
 	}
 	if(state == LOGIN_VERIFY){
-		DPRINTF("Need User To INPUT Verify Code, Return Successful\n");
-		strcpy(verifycode, contexWeb.captchafile);
+		char capbuf[1024] = {0};
+		snprintf(capbuf, 1023, "%s/verifycode.gif", contexWeb.localdir);		
+		set_mutex_login(2);
+		DPRINTF("Need User To INPUT Verify Code, Return Successful[%s]\n", capbuf);		
+		if(copyFile(contexWeb.captchafile, capbuf) == FAILURE){
+			return -1;
+		}		
+		strcpy(verifycode, capbuf);		
 		return 1;
 	}else{
 		DPRINTF("Thread Join login thread\n");
 		pthread_join(contexWeb.tlogin, NULL);
-		contexWeb.tlogin = 0;
+		contexWeb.tlogin = 0;		
+		set_mutex_login(0);
 	}
 	if(state == LOGIN_OK){
 		/*Need to notify other thread to start download*/
-		login_successful(&contexWeb);
+		if(login_successful(&contexWeb) < 0){
+			state = LOGIN_FAILED;
+		}
 	}
 	
 	return state;
@@ -3223,6 +3280,17 @@ int pcs_web_api_verifycode(char *verifycode, int codesize)
 			strlen(verifycode) > 32){
 		return -1;
 	}
+	if(get_mutex_login() != 2){
+		DPRINTF("Login State Error, Not need to input verifycode\n");
+		return LOGIN_FAILED;
+	}
+	if(!contexWeb.tlogin){
+		DPRINTF("Thread login thread Not Start..\n");
+		return LOGIN_FAILED;
+	}else if(!strcasecmp(verifycode, "cancel")){
+		state = 0;
+		goto verify_fin;
+	}
 	
 	if(write(contexWeb.verify_fd, verifycode, codesize) != codesize){
 		DPRINTF("Write Verify Code Failed\n");
@@ -3233,13 +3301,18 @@ int pcs_web_api_verifycode(char *verifycode, int codesize)
 		DPRINTF("Read Login State Failed\n");
 		return -1;
 	}
+	
+verify_fin:
+	
 	DPRINTF("Thread Join login thread\n");
 	pthread_join(contexWeb.tlogin, NULL);
 	contexWeb.tlogin = 0;
 	
 	if(state == LOGIN_OK){
 		/*Need to notify other thread to start download*/
-		login_successful(&contexWeb);
+		if(login_successful(&contexWeb) < 0){
+			state = LOGIN_FAILED;
+		}
 	}
 	
 	return state;
@@ -3251,6 +3324,7 @@ int pcs_web_api_logout(void)
 	pthread_mutex_lock(&m_mutex);
 	contexWeb.islogin = 0;
 	pcs_logout(contexWeb.pcs);
+	remove(contexWeb.cookiefile);
 	destory_database(&contexWeb);
 	pthread_mutex_unlock(&m_mutex);
 

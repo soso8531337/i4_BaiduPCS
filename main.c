@@ -27,10 +27,86 @@
 #include <libgen.h>
 #include <linux/limits.h>
 #include <ctype.h>
+#include <errno.h>
 
 #include "common.h"
 #include "web_api.h"
 #define PCS_PORT	8400
+
+pthread_mutex_t m_thread=PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t m_condthr=PTHREAD_COND_INITIALIZER;
+
+typedef struct _threadStr{
+	pthread_t tid;
+	int status;
+	char buf[4096];
+	char HttpUrl[4096];
+	char opt[1024];
+	int fd;
+}threadStruct;
+
+
+threadStruct mutiServer[2];
+
+void *thread_http(void *arg)
+{
+	threadStruct *httpser = (threadStruct*)arg;
+
+	while(1){
+		pthread_mutex_lock(&m_thread);
+		while(httpser->status == 0){				
+			pthread_cond_wait(&m_condthr, &m_thread);
+		}
+		pthread_mutex_unlock(&m_thread);
+		/*Begin Handle*/
+		cloud_handle_web_request(httpser->buf, httpser->HttpUrl, httpser->opt, httpser->fd);
+
+		pthread_mutex_lock(&m_thread);
+		close(httpser->fd);
+		httpser->status = 0;
+		pthread_mutex_unlock(&m_thread);
+	}
+}
+
+int multi_server_alloctask(char *buf, char *url, char *opt, int sockfd)
+{
+	int i;
+	
+	if(!buf || !url || !opt || !sockfd){
+		return -1;
+	}
+	while(1){
+		pthread_mutex_lock(&m_thread);
+		for(i= 0;i < 2; i++){
+			if(mutiServer[i].status){
+				continue;
+			}
+			/*Find the idle thread*/
+			memset(mutiServer[i].buf, 0, sizeof(mutiServer[i].buf));
+			memset(mutiServer[i].HttpUrl, 0, sizeof(mutiServer[i].HttpUrl));
+			memset(mutiServer[i].opt, 0, sizeof(mutiServer[i].opt));
+		
+			strncpy(mutiServer[i].buf, buf, sizeof(mutiServer[i].buf)-1);
+			strncpy(mutiServer[i].HttpUrl, url, sizeof(mutiServer[i].HttpUrl)-1);
+			strncpy(mutiServer[i].opt, opt, sizeof(mutiServer[i].opt)-1);
+			mutiServer[i].fd = sockfd;
+			mutiServer[i].status = 1;
+			break;
+		}
+		if(i < 2){
+			pthread_cond_broadcast(&m_condthr);			
+			pthread_mutex_unlock(&m_thread);
+			printf("MutiServer alloc Task Successful\n");
+			break;
+		}
+		pthread_mutex_unlock(&m_thread);
+		printf("No Thread To handle The Task\n");
+		usleep(200000);
+	}
+
+	return 0;
+}
+
 
 
 int 
@@ -107,7 +183,13 @@ debug_deamon:
 		DPRINTF("Cloud Web Server Init error!\n");
 		sleep(3);
 	}
-	
+
+	for(i = 0; i< 2; i++){
+		if(pthread_create(&mutiServer[i].tid, NULL, thread_http, (void*)&mutiServer[i])!= 0){
+			DPRINTF("Create Multi Server Thread Failed[%s]\n", strerror(errno));		
+			return -1;
+		}
+	}	
 	while (1)
 	{
 		FD_ZERO(&readset);	
@@ -197,8 +279,8 @@ debug_deamon:
 			i++;
 		}
 		DPRINTF("Http request opt=%s\n", value);
-		cloud_handle_web_request(buf, HttpUrl, value, cfd);
-		close(cfd);
+		multi_server_alloctask(buf, HttpUrl, value, cfd);
+		//close(cfd);
 	}
 
 	if (!ssl_thread_cleanup()){

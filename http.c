@@ -333,7 +333,7 @@ Login(char *buffer, char *url, char *opt, int sockfd)
 	int len;
 	char httpbuf[4096] = {0};
 #endif
-	char state[64] = {0}, verifycode[64] = {0};
+	char state[64] = {0}, verifycode[1024] = {0};
 	char int2buf[64] = {0};
 
 	ret = get_value_from_url(url, "state", state);	
@@ -348,25 +348,27 @@ Login(char *buffer, char *url, char *opt, int sockfd)
 	
 	if(!strcmp(state, "login")){
 		DPRINTF("Login Protocol..\n");
-		char username[128] = {0}, password[128] = {0};
+		char username[1024] = {0}, password[1024] = {0};
 		ret = get_value_from_url(url, "username", username);	
-		if (ret == FAILURE){
+		if (ret == FAILURE || strlen(username) == 0){
 			DPRINTF("Can Not Find [username] IN [%s]\n", url);
 			cloud_send_base_err(sockfd,  "Login", EWEB_BASE_ERROR);
 			return SUCCESS;
-		}
+		}		
+		str_decode_url(username, strlen(username), username, strlen(username) + 1);
 		ret = get_value_from_url(url, "password", password);	
-		if (ret == FAILURE){
+		if (ret == FAILURE || strlen(password) == 0){
 			DPRINTF("Can Not Find [password] IN [%s]\n", url);
 			cloud_send_base_err(sockfd,  "Login", EWEB_BASE_ERROR);
 			return SUCCESS;
 		}
-
+		str_decode_url(password, strlen(password), password, strlen(password) + 1);
 		ret = pcs_web_api_login(username, password, verifycode);
 		if(ret == 1){
 			DPRINTF("Need Verfiycode....\n");
 			xml_add_elem(XML_LABEL, "verify", "1", buf);
 			xml_add_elem(XML_LABEL, "verifycode", verifycode, buf);
+			ret = 0;
 		}else{
 			xml_add_elem(XML_LABEL, "verify", "0", buf);
 			xml_add_elem(XML_LABEL, "verifycode", NULL, buf);
@@ -380,7 +382,8 @@ Login(char *buffer, char *url, char *opt, int sockfd)
 			cloud_send_base_err(sockfd,  "Login", EWEB_BASE_ERROR);
 			return SUCCESS;
 		}
-
+		str_decode_url(verifycode, strlen(verifycode), verifycode, strlen(verifycode) + 1);
+		DPRINTF("User Input VerifyCode is %s\n", verifycode);
 		ret = pcs_web_api_verifycode(verifycode, strlen(verifycode));
 		xml_add_elem(XML_LABEL, "verify", "0", buf);
 		sprintf(int2buf, "%d", ret>= 0?ret:EWEB_LOGIN_FAIL);		
@@ -965,7 +968,12 @@ Prog(char *buffer, char *url, char *opt, int sockfd)
 	str_encode_url(recing.record.path, strlen(recing.record.path), &encodbuf);
 	xml_add_elem(XML_LABEL, "path", encodbuf, buf);
 	FREE(encodbuf);
-	xml_add_elem(XML_LABEL, "dltotal", recing.record.size, buf);
+	if(!strlen(recing.record.size)
+		||!atoll(recing.record.size)){
+		xml_add_elem(XML_LABEL, "dltotal", "0", buf);
+	}else{
+		xml_add_elem(XML_LABEL, "dltotal", recing.record.size, buf);
+	}
 	sprintf(tmpbuf, "%.0f", recing.now);
 	xml_add_elem(XML_LABEL, "dlnow", tmpbuf, buf);
 	xml_add_elem(XML_ELEM_END, "dl", NULL, buf);
@@ -1070,7 +1078,12 @@ Getlist(char *buffer, char *url, char *opt, int sockfd)
 	str_encode_url(recing.record.path, strlen(recing.record.path), &encodbuf);
 	xml_add_elem(XML_LABEL, "path", encodbuf, buf);
 	FREE(encodbuf);
-	xml_add_elem(XML_LABEL, "size", recing.record.size, buf);
+	if(!strlen(recing.record.size)
+		||!atoll(recing.record.size)){	
+		xml_add_elem(XML_LABEL, "size", "0", buf);
+	}else{
+		xml_add_elem(XML_LABEL, "size", recing.record.size, buf);
+	}
 	sprintf(tmpbuf, "%.0f", recing.now);
 	if(uptalbe == 1){
 		xml_add_elem(XML_LABEL, "up_now", tmpbuf, buf);
@@ -1258,7 +1271,12 @@ Getlist2(char *buffer, char *url, char *opt, int sockfd)
 			str_encode_url(recing.record.path, strlen(recing.record.path), &encodbuf);
 			xml_add_elem(XML_LABEL, "path", encodbuf, buf);
 			FREE(encodbuf);
-			xml_add_elem(XML_LABEL, "size", recing.record.size, buf);
+			if(!strlen(recing.record.size)
+				||!atoll(recing.record.size)){	
+				xml_add_elem(XML_LABEL, "size", "0", buf);
+			}else{
+				xml_add_elem(XML_LABEL, "size", recing.record.size, buf);
+			}			
 			sprintf(tmpbuf, "%.0f", recing.now);
 			if(uptable == 1){
 				xml_add_elem(XML_LABEL, "up_now", tmpbuf, buf);
