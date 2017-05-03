@@ -386,7 +386,14 @@ Login(char *buffer, char *url, char *opt, int sockfd)
 		DPRINTF("User Input VerifyCode is %s\n", verifycode);
 		ret = pcs_web_api_verifycode(verifycode, strlen(verifycode));
 		if(ret == 1){
-			xml_add_elem(XML_LABEL, "verify", "1", buf);
+			xml_add_elem(XML_LABEL, "verify", "1", buf);	
+		#ifndef VERIFY_RETURN
+			char codebuf[1024] = {0};
+			if(pcs_web_api_getverifycode(codebuf, 1024) == 0){
+				xml_add_elem(XML_LABEL, "verifycode", codebuf, buf);
+			}
+		#endif
+			ret = 0;
 		}else{
 			xml_add_elem(XML_LABEL, "verify", "0", buf);
 		}

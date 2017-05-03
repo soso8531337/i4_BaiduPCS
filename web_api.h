@@ -73,7 +73,9 @@ int pcs_web_api_getdata_record(rec_t *rectp, char *fmt, ...);
 int pcs_web_api_exesql(char *fmt, ...);
 int pcs_web_api_dlprogress_interp(char *path);
 int pcs_web_api_update_deletedb(char *path);
-
+#ifndef VERIFY_RETURN	
+int pcs_web_api_getverifycode(char *verifycode, int codesize);
+#endif
 
 
 

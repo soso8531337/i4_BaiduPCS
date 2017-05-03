@@ -38,11 +38,11 @@
 #include "sql.h"
 #include "web_api.h"
 
-#define SORT_DIRECTION_ASC	0 /*ÕıĞò*/
-#define SORT_DIRECTION_DESC 1 /*µ¹Ğò*/
+#define SORT_DIRECTION_ASC	0 /*æ­£åº*/
+#define SORT_DIRECTION_DESC 1 /*å€’åº*/
 #define PCS_HTTP_TRY			3
 #define PCS_THREAD_NUM			4
-#define PRINT_PAGE_SIZE			20		/*ÁĞ³öÄ¿Â¼»òÁĞ³ö±È½Ï½á¹ûÊ±£¬·ÖÒ³´óĞ¡*/
+#define PRINT_PAGE_SIZE			20		/*åˆ—å‡ºç›®å½•æˆ–åˆ—å‡ºæ¯”è¾ƒç»“æœæ—¶ï¼Œåˆ†é¡µå¤§å°*/
 #define PCS_MULTI_DOWNNUM	4
 #define PCS_DEFAULT_CONFIGDIR		"/etc/config/pcs"
 #define PCS_REMOTE_DIR			"/SmartHDD"
@@ -149,21 +149,21 @@ typedef struct _metadata_t {
 } metadata_t, *metadata_tp;
 
 typedef struct _webContext{
-	char	contextfile[CONFIG_STRLEN]; /*ÉÏÏÂÎÄÎÄ¼şµÄÂ·¾¶*/
-	char	cookiefile[CONFIG_STRLEN]; /*CookieÎÄ¼şÂ·¾¶*/
-	char	captchafile[CONFIG_STRLEN]; /*ÑéÖ¤ÂëÍ¼Æ¬Â·¾¶*/
-	char	workdir[CONFIG_STRLEN]; /*µ±Ç°¹¤×÷Ä¿Â¼*/
+	char	contextfile[CONFIG_STRLEN]; /*ä¸Šä¸‹æ–‡æ–‡ä»¶çš„è·¯å¾„*/
+	char	cookiefile[CONFIG_STRLEN]; /*Cookieæ–‡ä»¶è·¯å¾„*/
+	char	captchafile[CONFIG_STRLEN]; /*éªŒè¯ç å›¾ç‰‡è·¯å¾„*/
+	char	workdir[CONFIG_STRLEN]; /*å½“å‰å·¥ä½œç›®å½•*/
 	char 	localdir[CONFIG_STRLEN];	/*where save config in local*/
 	int		syncon;	/*sync on or off*/
 	int 	islogin;/*login or not*/
 
 	Pcs 	pcs;
-	int		list_page_size; /*Ö´ĞĞlistÃüÁîÊ±£¬Ã¿Ò³´óĞ¡*/
-	char	list_sort_name[CONFIG_STRLEN>>4]; /*Ö´ĞĞlistÃüÁîÊ±£¬ÅÅĞò×Ö¶Î£¬¿ÉÑ¡Öµ£ºname|time|size*/
-	char	list_sort_direction[CONFIG_STRLEN>>4]; /*Ö´ĞĞlistÃüÁîÊ±£¬ÅÅĞò×Ö¶Î£¬¿ÉÑ¡Öµ£ºasc|desc*/
-	int		timeout_retry;  /*ÊÇ·ñÆôÓÃ³¬Ê±ºóÖØÊÔ*/
-	int		max_thread; /*Ö¸¶¨×î´óÏß³ÌÊıÁ¿*/
-	int		max_speed_per_thread; /*Ö¸¶¨µ¥¸öÏß³ÌµÄ×î¶àÏÂÔØËÙ¶È*/
+	int		list_page_size; /*æ‰§è¡Œlistå‘½ä»¤æ—¶ï¼Œæ¯é¡µå¤§å°*/
+	char	list_sort_name[CONFIG_STRLEN>>4]; /*æ‰§è¡Œlistå‘½ä»¤æ—¶ï¼Œæ’åºå­—æ®µï¼Œå¯é€‰å€¼ï¼šname|time|size*/
+	char	list_sort_direction[CONFIG_STRLEN>>4]; /*æ‰§è¡Œlistå‘½ä»¤æ—¶ï¼Œæ’åºå­—æ®µï¼Œå¯é€‰å€¼ï¼šasc|desc*/
+	int		timeout_retry;  /*æ˜¯å¦å¯ç”¨è¶…æ—¶åé‡è¯•*/
+	int		max_thread; /*æŒ‡å®šæœ€å¤§çº¿ç¨‹æ•°é‡*/
+	int		max_speed_per_thread; /*æŒ‡å®šå•ä¸ªçº¿ç¨‹çš„æœ€å¤šä¸‹è½½é€Ÿåº¦*/
 
 	char	user_agent[CONFIG_STRLEN];	/*user agent*/
 
@@ -225,7 +225,7 @@ cloud_set_errno(Errtype errtype, int oerrno)
 }
 /* reset error no to ok */
 
-/*»ñÈ¡ÉÏÏÂÎÄ´æ´¢ÎÄ¼şÂ·¾¶*/
+/*è·å–ä¸Šä¸‹æ–‡å­˜å‚¨æ–‡ä»¶è·¯å¾„*/
 static int contextfile(char *name, int size)
 {
 	memset(name, 0, size);
@@ -235,7 +235,7 @@ static int contextfile(char *name, int size)
 	return 0;
 }
 
-/*·µ»ØCOOKIEÎÄ¼şÂ·¾¶*/
+/*è¿”å›COOKIEæ–‡ä»¶è·¯å¾„*/
 static int cookiefile(char *name, int size)
 {
 	memset(name, 0, size);
@@ -245,7 +245,7 @@ static int cookiefile(char *name, int size)
 	return 0;
 }
 
-/*·µ»ØÑéÖ¤ÂëÍ¼Æ¬ÎÄ¼şÂ·¾¶*/
+/*è¿”å›éªŒè¯ç å›¾ç‰‡æ–‡ä»¶è·¯å¾„*/
 static int captchafile(char *name, int size)
 {
 	memset(name, 0, size);
@@ -2371,7 +2371,7 @@ void *thread_down_task(void *arg)
 				mTask[current].seginfo.threadNum, mTask[current].fileDown, 
 				mTask[current].seginfo.sp, mTask[current].seginfo.ep, mTask[current].seginfo.ds);
 
-		/*´´½¨Ä¿Â¼*/
+		/*åˆ›å»ºç›®å½•*/
 		dir = base_dir(localfile, -1);
 		if (dir){
 			if (CreateDirectoryRecursive(dir) != MKDIR_OK) {
@@ -2440,14 +2440,14 @@ void *thread_down_task(void *arg)
 	}
 }
 
-/*hood cJSON ¿âÖĞ·ÖÅäÄÚ´æµÄ·½·¨£¬ÓÃÓÚ¼ì²éÄÚ´æĞ¹Â©*/
+/*hood cJSON åº“ä¸­åˆ†é…å†…å­˜çš„æ–¹æ³•ï¼Œç”¨äºæ£€æŸ¥å†…å­˜æ³„æ¼*/
 static void hook_cjson()
 {
 	cJSON_Hooks hooks = { 0 };
 	cJSON_InitHooks(&hooks);
 }
 
-/*ÏÔÊ¾ÉÏ´«½ø¶È*/
+/*æ˜¾ç¤ºä¸Šä¼ è¿›åº¦*/
 static int upload_progress(void *clientp, double dltotal, double dlnow, double ultotal, double ulnow)
 {
 	char *path = (char *)clientp;
@@ -2463,7 +2463,7 @@ static int upload_progress(void *clientp, double dltotal, double dlnow, double u
 	return 0;
 }
 
-/*Êä³öÑéÖ¤ÂëÍ¼Æ¬£¬²¢µÈ´ıÓÃ»§ÊäÈëÊ¶±ğ½á¹û*/
+/*è¾“å‡ºéªŒè¯ç å›¾ç‰‡ï¼Œå¹¶ç­‰å¾…ç”¨æˆ·è¾“å…¥è¯†åˆ«ç»“æœ*/
 static PcsBool verifycode(unsigned char *ptr, size_t size, char *captcha, size_t captchaSize, void *state)
 {
 	webContext *context = (webContext *)state;
@@ -2583,7 +2583,7 @@ verify_try:
 	return PcsTrue;
 }
 
-/*³õÊ¼»¯PCS*/
+/*åˆå§‹åŒ–PCS*/
 static Pcs *create_pcs(webContext *context)
 {
 	Pcs *pcs = pcs_create(context->cookiefile);
@@ -2606,7 +2606,7 @@ static void destroy_pcs(Pcs *pcs)
 	pcs_destroy(pcs);
 }
 
-/*°ÑÉÏÏÂÎÄ×ª»»Îª×Ö·û´®*/
+/*æŠŠä¸Šä¸‹æ–‡è½¬æ¢ä¸ºå­—ç¬¦ä¸²*/
 static char *context2str(webContext *context)
 {
 	char *json;
@@ -2712,7 +2712,7 @@ static char *context2str(webContext *context)
 }
 
 
-/*±£´æÉÏÏÂÎÄ*/
+/*ä¿å­˜ä¸Šä¸‹æ–‡*/
 static void save_context(webContext *context)
 {
 	const char *filename;
@@ -2737,8 +2737,8 @@ static void save_context(webContext *context)
 	pcs_free(json);
 }
 
-/*»¹Ô­±£´æµÄÉÏÏÂÎÄ¡£
-³É¹¦·µ»Ø0£¬Ê§°Ü·µ»Ø·Ç0Öµ¡£*/
+/*è¿˜åŸä¿å­˜çš„ä¸Šä¸‹æ–‡ã€‚
+æˆåŠŸè¿”å›0ï¼Œå¤±è´¥è¿”å›é0å€¼ã€‚*/
 static int restore_context(webContext *context, const char *filename)
 {
 	char *filecontent = NULL;
@@ -2896,7 +2896,7 @@ static int restore_context(webContext *context, const char *filename)
 	return 0;
 }
 
-/*³õÊ¼»¯ÉÏÏÂÎÄ*/
+/*åˆå§‹åŒ–ä¸Šä¸‹æ–‡*/
 static int init_context(webContext *context)
 {
 	memset(context, 0, sizeof(webContext));
@@ -3278,6 +3278,24 @@ int pcs_web_api_login(char *username, char *password, char *verifycode)
 	return state;
 }
 
+#ifndef VERIFY_RETURN	
+int pcs_web_api_getverifycode(char *verifycode, int codesize)
+{
+	char capbuf[1024] = {0};
+
+	if(!verifycode || !codesize){
+		return -1;
+	}	
+	snprintf(capbuf, 1023, "%s/verifycode.gif", contexWeb.localdir);		
+	if(copyFile(contexWeb.captchafile, capbuf) == FAILURE){
+		return -1;
+	}
+	memset(verifycode, 0, codesize);
+	strncpy(verifycode, capbuf, codesize-1);
+	
+	return 0;
+}
+#endif
 int pcs_web_api_verifycode(char *verifycode, int codesize)
 {
 	int state = -1;
@@ -3308,11 +3326,18 @@ int pcs_web_api_verifycode(char *verifycode, int codesize)
 		return -1;
 	}
 	printf("Read Login State is %d\n", state);
+#ifdef VERIFY_RETURN	
 	if(state == LOGIN_VERIFY){
 		printf("Login itself Invoke VerifyCode Set to Cancel Login!!!!!!!!!!!!!!!!!!!!!!!...\n");
 		set_mutex_login(0);		
 		state = LOGIN_FAILED;
 	}
+#else
+	if(state == LOGIN_VERIFY){
+		printf("Login itself Invoke VerifyCode Return To APP Input VerifyCode!!!!!!!!!!!!!!!!!!!!!!!...\n");
+		return 1;
+	}
+#endif
 verify_fin:
 	
 	DPRINTF("Thread Join login thread\n");
