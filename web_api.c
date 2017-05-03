@@ -206,6 +206,7 @@ webContext contexWeb;
 static Pcs *create_pcs(webContext *context);
 static void destroy_pcs(Pcs *pcs);
 static int get_mutex_login(void);
+static void set_mutex_login(int state);
 
 /*********************************************************************************/
 int
@@ -2221,7 +2222,8 @@ log_finish:
 	if(get_mutex_login()){
 		printf("Notify To Phone..\n");
 		write(context->login_fd, &state, sizeof(state));
-	}
+	}	
+	set_mutex_login(0);
 	return NULL;
 }
 
@@ -2472,6 +2474,7 @@ static PcsBool verifycode(unsigned char *ptr, size_t size, char *captcha, size_t
 	int rc, status = 0;
 	
 	savedfile = context->captchafile;
+	printf("VerfyCode Invoke Tid:%d\n", pthread_self());
 
 	pf = fopen(savedfile, "wb");
 	if (!pf) {
@@ -2481,12 +2484,14 @@ static PcsBool verifycode(unsigned char *ptr, size_t size, char *captcha, size_t
 	fwrite(ptr, 1, size, pf);
 	fclose(pf);
 
-	/*notify to unblock*/
+	/*notify to unblock*/	
+	pthread_mutex_lock(&m_login);
 	status = LOGIN_VERIFY;
 	if(write(context->login_fd, &status, sizeof(status))<=0){
 		printf("Notify To Client---->Need VerifyCode\n");
 	}
 	printf("The captcha image at %s.\nPlease input the captcha code: ", savedfile);
+	pthread_mutex_unlock(&m_login);
 
 	while(1){
 		pthread_mutex_lock(&m_login);
@@ -3202,9 +3207,10 @@ int pcs_web_api_login(char *username, char *password, char *verifycode)
 		return -1;
 	}
 
-	set_mutex_login(0);
-	if(contexWeb.tlogin){
+	if(get_mutex_login()
+			|| contexWeb.tlogin){
 		DPRINTF("Having Been Login, Please Wait....\n");		
+		set_mutex_login(0);
 		pthread_join(contexWeb.tlogin, NULL);
 		contexWeb.tlogin = 0;
 	}
@@ -3301,7 +3307,12 @@ int pcs_web_api_verifycode(char *verifycode, int codesize)
 		DPRINTF("Read Login State Failed\n");
 		return -1;
 	}
-	
+	printf("Read Login State is %d\n", state);
+	if(state == LOGIN_VERIFY){
+		printf("Login itself Invoke VerifyCode Set to Cancel Login!!!!!!!!!!!!!!!!!!!!!!!...\n");
+		set_mutex_login(0);		
+		state = LOGIN_FAILED;
+	}
 verify_fin:
 	
 	DPRINTF("Thread Join login thread\n");

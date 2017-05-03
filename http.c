@@ -385,7 +385,11 @@ Login(char *buffer, char *url, char *opt, int sockfd)
 		str_decode_url(verifycode, strlen(verifycode), verifycode, strlen(verifycode) + 1);
 		DPRINTF("User Input VerifyCode is %s\n", verifycode);
 		ret = pcs_web_api_verifycode(verifycode, strlen(verifycode));
-		xml_add_elem(XML_LABEL, "verify", "0", buf);
+		if(ret == 1){
+			xml_add_elem(XML_LABEL, "verify", "1", buf);
+		}else{
+			xml_add_elem(XML_LABEL, "verify", "0", buf);
+		}
 		sprintf(int2buf, "%d", ret>= 0?ret:EWEB_LOGIN_FAIL);		
 		xml_add_elem(XML_LABEL, "errno", int2buf, buf);
 	}else{
