@@ -2254,6 +2254,8 @@ void *thread_server(void *arg)
 					cloud_set_errno(ENETWORK, 0);
 				}
 			}
+			/*Reset count for new count*/
+			count = 0;
 		}
 		pthread_mutex_unlock(&m_mutex);
 
@@ -2975,13 +2977,18 @@ static int init_database(webContext *context)
 	if(context->islogin){		
 		int db_vers = -1;
 		sqlite3 *db_tmp;
+		char dbfix[PATH_MAX] = {0}, *pstr = NULL;
 
 		if(context->db){
 			sqlite3_close(context->db);
 			context->db = NULL;
 		}
+		snprintf(dbfix, sizeof(dbfix)-1,
+				"%s.db", PCS_DBDIR_POSTFIX, pcs_sysUID(context->pcs));
 		if(strlen(context->dbdir) == 0 || 
-			access(context->dbdir, F_OK) != 0){
+			access(context->dbdir, F_OK) != 0 ||
+			(pstr = strrchr(context->dbdir, '/')) == NULL||
+				strncmp(dbfix, pstr+1, strlen(dbfix)) != 0){
 			snprintf(context->dbdir, sizeof(context->dbdir)-1,
 					"%s/%s%s.db", context->localdir, PCS_DBDIR_POSTFIX, pcs_sysUID(context->pcs));
 			if(access(context->dbdir, F_OK)){
@@ -3063,6 +3070,7 @@ static int login_successful(webContext *context)
 {
 	int64_t quota, used;
 	char *bufdir;
+	char diskpath[PATH_MAX] = {0};
 
 	if(pcs_islogin(context->pcs) != PCS_LOGIN){
 		printf("We Check Again Found Baidu Not login\n");
@@ -3091,7 +3099,12 @@ static int login_successful(webContext *context)
 		pcs_free(bufdir);
 	}
 	strcpy(context->username, pcs_sysUID(context->pcs));
-	save_context(context);
+	save_context(context);	
+	sprintf(diskpath, "%s/%s(%s)", context->localdir, PCS_LOCAL_DIR, context->username);
+	if(access(diskpath, F_OK)){
+		printf("Create %s\n", diskpath);
+		CreateDirectoryRecursive(diskpath);
+	}
 	pthread_cond_broadcast(&m_cond);
 	pthread_mutex_unlock(&m_mutex);
 
