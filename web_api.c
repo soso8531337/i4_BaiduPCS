@@ -46,7 +46,8 @@
 #define PCS_MULTI_DOWNNUM	4
 #define PCS_DEFAULT_CONFIGDIR		"/etc/config/pcs"
 #define PCS_REMOTE_DIR			"/SmartHDD"
-#define PCS_LOCAL_DIR			"Baidu"
+//#define PCS_LOCAL_DIR			"Baidu"
+#define PCS_LOCAL_DIR			"百度云"
 #define PCS_TMP_FILE		".bd"
 #define PCS_DBDIR_POSTFIX			".vst/Baidu/"
 #define PCS_IPC_VERIFY			"/tmp/ipc.verify"
