@@ -188,6 +188,7 @@ typedef struct _webContext{
 /*********************************************************************************/
 pthread_mutex_t m_mutex=PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t m_cond=PTHREAD_COND_INITIALIZER;
+pthread_mutex_t m_mutexerr=PTHREAD_MUTEX_INITIALIZER;
 
 pthread_mutex_t m_down=PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t m_login=PTHREAD_MUTEX_INITIALIZER;
@@ -213,14 +214,14 @@ static void set_mutex_login(int state);
 int
 cloud_set_errno(Errtype errtype, int oerrno)
 {	
-	pthread_mutex_lock(&m_mutex);
+	pthread_mutex_lock(&m_mutexerr);
 	if(errtype == ESTORAGE){
 		storageStatus= oerrno;
 	}else if(errtype == ENETWORK){
 		networkStatus= oerrno;
 	}
 
-	pthread_mutex_unlock(&m_mutex);
+	pthread_mutex_unlock(&m_mutexerr);
 	
 	return SUCCESS;
 }
@@ -448,7 +449,7 @@ int pcs_multi_down_set_interupte(char *mdinfo, size_t size)
 		return FAILURE;
 	}	
 	lseek(fd, size, SEEK_SET);
-
+	memset(seginfo, 0, sizeof(segment)*PCS_MULTI_DOWNNUM);
 	
 	for(current = 0; current < PCS_MULTI_DOWNNUM; current++){
 		if(mTask[current].seginfo.threadNum == 0){
@@ -459,7 +460,7 @@ int pcs_multi_down_set_interupte(char *mdinfo, size_t size)
 				mTask[current].reCode == PCS_RECODE_OK_NFOUND)){
 			continue;
 		}
-		memcpy(&seginfo[current], &(mTask[current].seginfo), sizeof(segment));
+		memcpy(&seginfo[segnum], &(mTask[current].seginfo), sizeof(segment));
 		segnum ++;
 
 	}
@@ -546,8 +547,9 @@ int pcs_multi_down_update_mdinfo(char *mdinfo, size_t size)
 		}
 		return FAILURE;
 	}
-	
+	memset(seginfo, 0, sizeof(segment)*PCS_MULTI_DOWNNUM);
 	lseek(fd, size, SEEK_SET);
+
 	for(current = 0; current < PCS_MULTI_DOWNNUM; current++){
 		if(mTask[current].seginfo.threadNum == 0){
 			continue;
@@ -558,24 +560,30 @@ int pcs_multi_down_update_mdinfo(char *mdinfo, size_t size)
 			DPRINTF("CUID#%d Finish....[sp:%lld-->ep:%lld]\n", mTask[current].seginfo.threadNum,
 					mTask[current].seginfo.sp, mTask[current].seginfo.ep);
 			continue;
+		}else if(mTask[current].seginfo.ds >= mTask[current].downSzie){
+			DPRINTF("CUID#%d Finish[DownLoad Size is OK]....[sp:%lld-->ep:%lld]\n", mTask[current].seginfo.threadNum,
+					mTask[current].seginfo.sp, mTask[current].seginfo.ep);			
+			continue;
 		}
 		
+		memcpy(&seginfo[segnum], &(mTask[current].seginfo), sizeof(segment));		
 		segnum ++;
-		memcpy(&seginfo[current], &(mTask[current].seginfo), sizeof(segment));
 	}
-
-	dwstate.down_magic = THREAD_STATE_MAGIC;
-	dwstate.segnum = segnum;
-	write(fd, &dwstate, sizeof(dwstate));
-	writelen = write(fd, seginfo, sizeof(segment) *segnum);
-	if(writelen != sizeof(segment)*segnum){
-		close(fd);
-		if(errno == ENOSPC){			
-			cloud_set_errno(ESTORAGE, ENOR_DISKFULL);
+	if(segnum == 0){
+		printf("MayBe Have Download Finish...\n");
+	}else{
+		dwstate.down_magic = THREAD_STATE_MAGIC;
+		dwstate.segnum = segnum;
+		write(fd, &dwstate, sizeof(dwstate));
+		writelen = write(fd, seginfo, sizeof(segment) *segnum);
+		if(writelen != sizeof(segment)*segnum){
+			close(fd);
+			if(errno == ENOSPC){			
+				cloud_set_errno(ESTORAGE, ENOR_DISKFULL);
+			}
+			return FAILURE;
 		}
-		return FAILURE;
 	}
-
 	close(fd);
 
 	return SUCCESS;
@@ -684,6 +692,18 @@ int cloud_check_condition(void)
 
 	return ret;
 }
+int cloud_check_condition_nolock(void)
+{
+	int ret = 0;
+
+	if(contexWeb.islogin == 0 || 
+			contexWeb.syncon == 0 || 
+		networkStatus|| storageStatus){
+		ret = -1;
+	}
+
+	return ret;
+}
 
 int
 cloud_set_downprogress(OP_ACTION act, rec_t *recp)
@@ -756,7 +776,7 @@ cloud_get_downprogress(progress_t *progp)
 	pthread_mutex_lock(&m_down);
 	downprogress.method = 1;
 	memcpy(progp, &downprogress, sizeof(progress_t));
-	printf("++++++++++++++++++++++++++++++++++Now-->%ldByte...\n", (long long)downprogress.now);
+	printf("+++++++++++++++%s:Now-->%ldByte...\n", downprogress.record.path, (long long)downprogress.now);
 	pthread_mutex_unlock(&m_down);
 
 	return SUCCESS;
@@ -875,12 +895,7 @@ int sql_get_same_md5_record(rec_t *rectp, sqlite3 *db, char *fmt, ...)
 		for ( i = 0; i < cols; ++i ){		
 			if(rows > 1 && rectp->id && strcasecmp(result[i], "id") == 0){
 				memset(lpath, 0, sizeof(lpath));
-				if(pcs_convert_path_to_local(rectp->path, lpath) == FAILURE){
-					sqlite3_free_table(result);
-					sqlite3_free(sql);
-					va_end(ap);	
-					return FAILURE;
-				}				
+				strcpy(lpath, rectp->path);				
 				if(lstat(lpath, &st) == 0 && 
 						st.st_size == atoll(rectp->size)){
 					DPRINTF("Found A SAME MD5 Record.....\n");
@@ -956,12 +971,7 @@ int sql_get_same_md5_record(rec_t *rectp, sqlite3 *db, char *fmt, ...)
 		}
 		if(found == 0){
 			memset(lpath, 0, sizeof(lpath));
-			if(pcs_convert_path_to_local(rectp->path, lpath) == FAILURE){
-				sqlite3_free_table(result);
-				sqlite3_free(sql);
-				va_end(ap); 
-				return FAILURE;
-			}				
+			strcpy(lpath, rectp->path); 			
 			if(lstat(lpath, &st) == 0 && 
 					st.st_size == atoll(rectp->size)){
 				DPRINTF("Found A SAME MD5 Record.....\n");
@@ -1268,10 +1278,11 @@ int pcs_update_done_table(PCS_ACTION action, sqlite3 *db, int status, rec_t *rec
 	}
 	DPRINTF("Reduce DONE TABLE [%s] Records...\n", 
 			action==PCS_DOWN_ACTION?"DOWN":"UPLOAD");
-	sql = sqlite3_mprintf("SELECT ID FROM DONE WHERE ACTION='%d'" 
-			" ORDER BY ID  LIMIT %d OFFSET '%d' " , 
-				1, PCS_DONE_RECORD_MAX-PCS_DONE_RECORD);	
-	if( (sql_get_table(db, sql, &result, &rows, &cols) == SQLITE_OK)){
+	sql = sqlite3_mprintf("SELECT ID FROM DONE " 
+			" ORDER BY LTIME desc  LIMIT 1 OFFSET '%d' " , 
+				PCS_DONE_RECORD_MAX-PCS_DONE_RECORD);	
+	if( (sql_get_table(db, sql, &result, &rows, &cols) == SUCCESS)){
+		printf("Prepare to Delete DONE %d Records\n", rows);
 		if (rows){
 			for( i = cols; i <= (rows ) * cols; i += cols){
 				detailID = strtoll(result[i], NULL, 10);
@@ -1636,8 +1647,19 @@ int pcs_multi_initinfo_from_file(char *down, char *mdinfo, size_t size)
 	
 	memset(mTask, 0, sizeof(muti_taskinfo) *PCS_MULTI_DOWNNUM);
 	for(current = 0; current < PCS_MULTI_DOWNNUM; current++){
+		if(seginfo[current].threadNum > PCS_MULTI_DOWNNUM ||
+				seginfo[current].ds > size){
+			DPRINTF("Segment Download Part Error:%d\n", seginfo[current].threadNum);
+			remove(mdinfo);
+			free(seginfo);
+			return FAILURE;
+		}
 		memcpy(mTask[current].fileDown, down, strlen(down));
 		if(current < dwstate.segnum){
+			if(seginfo[current].ds < 0){
+				DPRINTF("Warning: Segment ds error reset to 0:%lld..!!!!!!!!!!!!!!!!!!!!!!!!\n", seginfo[current].ds);
+				seginfo[current].ds = 0;
+			}			
 			memcpy(&(mTask[current].seginfo), &seginfo[current], sizeof(segment));
 			mTask[current].downSzie = mTask[current].seginfo.ep-mTask[current].seginfo.sp+1;
 		}
@@ -1709,20 +1731,17 @@ int pcs_download_chk_same_md5(sqlite3 *db, rec_t * record)
 	DPRINTF("We Found MD5 is Same [%s]<-->[%s], No need To Download again...\n", 
 			query.path, record->path);
 	
-	if(pcs_convert_path_to_local(record->path, lpath) == FAILURE
-		|| pcs_convert_path_to_local(query.path, dpath) == FAILURE){
+	if(pcs_convert_path_to_local(record->path, lpath) == FAILURE){
 		return FAILURE;
-	}	
-	if((sfd = open(dpath, O_RDONLY)) <0 || lstat(tmpfile, &dst)){
+	}
+	strcpy(dpath, query.path);
+	if((sfd = open(dpath, O_RDONLY)) <0 || lstat(dpath, &dst)){
 		DPRINTF("OPEN: [%s]  error. [errmsg: %s]\n", 
 				dpath, strerror(errno));
 		return FAILURE;
 	}
 	sprintf(tmpfile, "%s%s", lpath, PCS_TMP_FILE);
-	if(lstat64(tmpfile, &st) == 0){
-		DPRINTF("TMP FILE [%s] Exist...\n", tmpfile);	
-		cpsize = st.st_size;
-	}else{
+	if(lstat(tmpfile, &st) != 0){
 		char dirpath[PATH_MAX] = {0}, *pdir = NULL;
 		/*we need to mkdir*/
 		memcpy(dirpath, lpath, strlen(lpath));
@@ -1730,7 +1749,6 @@ int pcs_download_chk_same_md5(sqlite3 *db, rec_t * record)
 		if (pdir && access(pdir, F_OK) != 0){		
 			CreateDirectoryRecursive(pdir);	
 		}
-		cpsize = 0;
 	}
 	if((tfd = open(tmpfile, O_CREAT|O_WRONLY|O_TRUNC, S_IRUSR|S_IWUSR)) <0){
 		DPRINTF("OPEN: [%s] error. [errmsg: %s]\n", 
@@ -1739,8 +1757,9 @@ int pcs_download_chk_same_md5(sqlite3 *db, rec_t * record)
 			return 2;
 		}		
 		return FAILURE;
-	}
-	if(st.st_size){
+	}	
+	cpsize = 0;
+	if(st.st_size && cpsize){
 		lseek(tfd, cpsize, SEEK_SET);
 		lseek(sfd, cpsize, SEEK_SET);
 	}
@@ -1921,7 +1940,10 @@ int pcs_multi_download_file(rec_t * record)
 		ret = pcs_multi_initinfo_from_file(record->path, dtmp, size);
 		if(ret == FAILURE){
 			DPRINTF("Get Multi-Down Info Failed...\n");
-			return FAILURE;
+			ret = pcs_multi_down_initinfo(record->path, size, dtmp);
+			if(ret == FAILURE){
+				return FAILURE;
+			}
 		}		
 	}
 
@@ -2064,6 +2086,7 @@ int pcs_get_localdir(char *dirname)
 				freesize = (unsigned long long)st.f_bsize * (unsigned long long)st.f_bavail;
 				if(freesize > maxsize){
 					strcpy(dirname, mnt->mnt_dir);
+					maxsize = freesize;
 				}
 			}
 		}
@@ -2084,10 +2107,14 @@ static int combin_with_remote_dir_files(webContext *context, const char *remote_
 	PcsFileInfo *info = NULL;
 	int page_index = 1,
 		page_size = 1000;
-	int cnt = 0, second;
+	int cnt = 0;
 	metadata_t meta;
 
 	while (1) {
+		if(cloud_check_condition_nolock() < 0){
+			DPRINTF("List File Interuput By condition..\n");
+			return -1;
+		}
 		list = pcs_list(context->pcs, remote_dir,
 			page_index, page_size,
 			"name", PcsFalse);
@@ -2095,14 +2122,7 @@ static int combin_with_remote_dir_files(webContext *context, const char *remote_
 			if (pcs_strerror(context->pcs)) {
 				fprintf(stderr, "Error: %s \n", pcs_strerror(context->pcs));
 				if (context->timeout_retry && strstr(pcs_strerror(context->pcs), "Can't get response from the remote server") >= 0) {
-					second = 10;
-					while (second > 0) {
-						printf("Retry after %d second...\n", second);
-						sleep(1);
-						second--;
-					}
-					//printf("Retrying...\n");
-					continue;
+					printf("List %s Failed...\n", remote_dir);
 				}
 				return -1;
 			}
@@ -2124,6 +2144,11 @@ static int combin_with_remote_dir_files(webContext *context, const char *remote_
 
 		pcs_filist_iterater_init(list, &iterater, PcsFalse);
 		while (pcs_filist_iterater_next(&iterater)) {
+			if(cloud_check_condition_nolock() < 0){
+				DPRINTF("List File Interuput By condition..\n");
+				pcs_filist_destroy(list); 
+				return -1;
+			}			
 			info = iterater.current;			
 			printf("List---->%s\n", info->path);
 			if(info->size == 0){
@@ -2152,7 +2177,12 @@ static int combin_with_remote_dir_files(webContext *context, const char *remote_
 
 		if (recursive) {
 			pcs_filist_iterater_init(list, &iterater, PcsFalse);
-			while (pcs_filist_iterater_next(&iterater)) {
+				while (pcs_filist_iterater_next(&iterater)) {
+				if(cloud_check_condition_nolock() < 0){
+					DPRINTF("List File Interuput By condition..\n");
+					pcs_filist_destroy(list); 
+					return -1;
+				}				
 				info = iterater.current;
 				if (info->isdir) {
 					if (combin_with_remote_dir_files(context, info->path, recursive, total_cnt)) {
@@ -2243,7 +2273,7 @@ void *thread_server(void *arg)
 		pthread_mutex_lock(&m_mutex);
 		while(context->islogin == 0 || 
 				context->syncon == 0 || 
-					networkStatus){
+					networkStatus || storageStatus){
 			gettimeofday(&now, NULL);
 			outtime.tv_sec = now.tv_sec + 60;
 			outtime.tv_nsec = now.tv_usec * 1000;					
@@ -2263,7 +2293,7 @@ void *thread_server(void *arg)
 			pcsres = pcs_quota(context->pcs, &quota, &used);
 			if (pcsres != PCS_OK) {
 				fprintf(stderr, "Error: %s\n", pcs_strerror(context->pcs));
-				usleep(500000);
+				usleep(1000000);
 				continue;
 			}
 			fprintf(stderr, "Capatity info:%lld==>%lld-->%lldbytes\n", quota, size, used);
@@ -2273,7 +2303,10 @@ void *thread_server(void *arg)
 				sprintf(context->used, "%lld", used);
 				sprintf(context->quota, "%lld", quota);
 				total = 0;
-				combin_with_remote_dir_files(context, context->workdir, 1, &total);
+				if(combin_with_remote_dir_files(context, context->workdir, 1, &total)< 0){
+					printf("List Dir Failed Try after 5s[%s]\n", context->workdir);
+					count = 90;
+				}
 			}
 			/*check network*/
 			if(pcs_connect_server() != SUCCESS){
@@ -2348,6 +2381,7 @@ void *thread_down_task(void *arg)
 	char *dir;
 	int fd, ret;
 	PcsRes res;
+	Pcs *pcs = NULL;
 	
 	if (setpriority(PRIO_PROCESS, 0, 19) == -1){
 		DPRINTF("Failed to reduce sync download thread priority\n");
@@ -2401,7 +2435,6 @@ void *thread_down_task(void *arg)
 		}
 
 		/*Begin to download*/		
-		Pcs *pcs = NULL;
 		pcs = create_pcs(&contexWeb);
 		if (!pcs) {
 			ret = -1;
@@ -2437,7 +2470,10 @@ void *thread_down_task(void *arg)
 			mTask[current].reCode = PCS_RECODE_OK;
 		}
 		if(pcs){
+			printf("Destory PCS:%p\n", pcs);
 			destroy_pcs(pcs);
+			printf("Destory PCS Finish:%p\n", pcs);
+			pcs = NULL;
 		}
 		pthread_mutex_unlock(&m_down);
 	}
@@ -2968,6 +3004,8 @@ static int init_database(webContext *context)
 		
 		if (0 == maxsize){
 			DPRINTF("*************NOT FOUND PARTION***************.\n");
+			memset(context->localdir, 0, sizeof(context->localdir));
+			cloud_set_errno(ESTORAGE, ENOR_NODISK);
 			return -1;
 		}else{
 			DPRINTF("************The partion is: \"%s\"\n", context->localdir);
@@ -3099,11 +3137,13 @@ static int login_successful(webContext *context)
 		pcs_free(bufdir);
 	}
 	strcpy(context->username, pcs_sysUID(context->pcs));
-	save_context(context);	
-	sprintf(diskpath, "%s/%s(%s)", context->localdir, PCS_LOCAL_DIR, context->username);
-	if(access(diskpath, F_OK)){
-		printf("Create %s\n", diskpath);
-		CreateDirectoryRecursive(diskpath);
+	save_context(context);
+	if(strlen(context->localdir)){
+		sprintf(diskpath, "%s/%s(%s)", context->localdir, PCS_LOCAL_DIR, context->username);
+		if(access(diskpath, F_OK)){
+			printf("Create %s\n", diskpath);
+			CreateDirectoryRecursive(diskpath);
+		}
 	}
 	pthread_cond_broadcast(&m_cond);
 	pthread_mutex_unlock(&m_mutex);
@@ -3142,9 +3182,14 @@ int pcs_web_api_init(void)
 
 	hook_cjson();
 
+	if(pcs_connect_server() != SUCCESS){
+		cloud_set_errno(ENETWORK, ENOR_NETBAD);
+		printf("NetWork is Bad...\n");
+	}
 	contextfile(config, sizeof(config));
 	if(access(config, F_OK) ||
-		restore_context(&contexWeb, config)!=0){
+		restore_context(&contexWeb, config)!=0 ||
+			!strlen(contexWeb.dbdir) || !strlen(contexWeb.localdir)){
 		remove(config);
 		DPRINTF("%s Not Exist or Restore Config Failed\n", config);
 		init_context(&contexWeb);
@@ -3228,8 +3273,8 @@ int pcs_web_api_login(char *username, char *password, char *verifycode)
 		pthread_join(contexWeb.tlogin, NULL);
 		contexWeb.tlogin = 0;
 	}
-	pcsres = pcs_islogin(contexWeb.pcs);
-	if(pcsres == PCS_LOGIN){
+	if(contexWeb.islogin || 
+			(pcsres = pcs_islogin(contexWeb.pcs)) == PCS_LOGIN){
 		DPRINTF("You have been logon. You can logout by 'logout' command and then relogin.\n");
 		if(atoi(contexWeb.used) == 0){
 			int64_t quota, used;
@@ -3239,7 +3284,8 @@ int pcs_web_api_login(char *username, char *password, char *verifycode)
 			}
 		}
 		strcpy(contexWeb.username, pcs_sysUID(contexWeb.pcs));
-		contexWeb.islogin = 1;		
+		contexWeb.islogin = 1;
+		login_successful(&contexWeb);
 		return 0;
 	}else if(pcsres != PCS_NOT_LOGIN){
 		DPRINTF("Something Error, We Not confirm if not login\n");		
@@ -3370,17 +3416,18 @@ verify_fin:
 
 int pcs_web_api_logout(void)
 {
-	
+	cloud_set_dlprogress_interp(NULL);	
 	pthread_mutex_lock(&m_mutex);
 	contexWeb.islogin = 0;
+	pthread_mutex_unlock(&m_mutex);
+	sleep(1);
+	pthread_mutex_lock(&m_mutex);
 	pcs_logout(contexWeb.pcs);
-	remove(contexWeb.cookiefile);
 	destory_database(&contexWeb);
 	pthread_mutex_unlock(&m_mutex);
-
-	cloud_set_dlprogress_interp(NULL);
-
-	sleep(5);
+	sleep(1);	
+	remove(contexWeb.cookiefile);
+	sleep(2);
 	return 0;
 }
 
@@ -3417,10 +3464,26 @@ int pcs_web_api_link(int *login, int *sync)
 	if(!login || !sync){
 		return -1;
 	}
+	if(pcs_connect_server() != SUCCESS){
+		printf("NetWork is BAD\n");
+		cloud_set_errno(ENETWORK, ENOR_NETBAD);
+		return -2;
+	}else{
+		cloud_set_errno(ENETWORK, 0);
+	}
+	if(storageStatus){
+		printf("Disk Error\n");
+		return -3;
+	}
 	pthread_mutex_lock(&m_mutex);
 	*sync = contexWeb.syncon;
 	*login = contexWeb.islogin;
 	pthread_mutex_unlock(&m_mutex);
+	if(*login == 0 &&
+			login_successful(&contexWeb) == 0){
+		printf("Login is detect...\n");	
+		*login = 1;		
+	}
 
 	return 0;
 }

@@ -54,9 +54,9 @@ endif
 
 PCS_CCFLAGS = -fPIC $(CCFLAGS) $(CYGWIN_CCFLAGS) $(APPLE_CCFLAGS) $(MINGW_CCFLAGS)
 
-all: bin/pcs
+all: bin/baidupcs
 
-bin/pcs : pre $(PCS_OBJS) $(SHELL_OBJS)
+bin/baidupcs : pre $(PCS_OBJS) $(SHELL_OBJS)
 	$(CC) -o $@ $(PCS_OBJS) $(SHELL_OBJS) $(CCFLAGS) $(CYGWIN_CCFLAGS) $(APPLE_CCFLAGS) $(MINGW_CCFLAGS) -lm -lcurl -lssl -lcrypto -lpthread -lsqlite3 -lz
 
 bin/main.o: main.c web_api.h
@@ -109,15 +109,15 @@ bin/libpcs.a : pre $(PCS_OBJS)
 
 .PHONY : install
 install:
-	cp ./bin/pcs /usr/local/bin
+	cp ./bin/baidupcs /usr/local/bin
 
 .PHONY : uninstall
 uninstall:
-	rm /usr/local/bin/pcs
+	rm /usr/local/bin/baidupcs
 
 .PHONY : clean
 clean :
-	-rm -f ./bin/*.o ./bin/*.so ./bin/pcs
+	-rm -f ./bin/*.o ./bin/*.so ./bin/baidupcs
 
 .PHONY : pre
 pre :

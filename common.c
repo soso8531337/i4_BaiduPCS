@@ -45,12 +45,14 @@
 
 #include "common.h"
 #define LOCKMODE (S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH)                 
+pthread_mutex_t m_mulog=PTHREAD_MUTEX_INITIALIZER;
 
 void log_debug(FILE *fp, char *fname, const char *func, int lineno, char *fmt, ...)
 {
 	va_list ap;
 	pid_t pid;
-	
+
+	pthread_mutex_lock(&m_mulog);	
 	if (fp == NULL)
 		fp=stderr;
 
@@ -72,13 +74,14 @@ void log_debug(FILE *fp, char *fname, const char *func, int lineno, char *fmt, .
 	va_start(ap, fmt);
 	if (vfprintf(fp, fmt, ap) == -1)
 	{
-		va_end(ap);
+		va_end(ap);		
+		pthread_mutex_unlock(&m_mulog);	
 		return;
 	}
 	va_end(ap);
 
 	fflush(fp);
-
+	pthread_mutex_unlock(&m_mulog); 
 	return;
 }
 

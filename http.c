@@ -72,6 +72,7 @@ typedef struct _oper_node{
         struct _oper_node *next;
         char *name;
 }oper_node;
+pthread_mutex_t m_mutexWeb=PTHREAD_MUTEX_INITIALIZER;
 
 static int Login(char *buffer, char *url, char *opt, int sockfd);
 static int GetInfo(char *buffer, char *url, char *opt, int sockfd);
@@ -311,7 +312,15 @@ int cloud_handle_web_request(char *buf, char *url, char *opt, int sockfd)
 	while(cur_func->handle_func && cur_func->opt){
 		if(strcmp(opt, cur_func->opt) == 0){
 			DPRINTF("Find HTTP Handle Funciton [%s]\n", cur_func->opt);
+			if(strcmp(cur_func->opt, "Login")){
+				pthread_mutex_lock(&m_mutexWeb);
+				printf("Web Lock...\n");
+			}
 			cur_func->handle_func(buf, url, opt, sockfd);
+			if(strcmp(cur_func->opt, "Login")){				
+				printf("Web unLock...\n");
+				pthread_mutex_unlock(&m_mutexWeb);
+			}			
 			break;
 		}
 		cur_func++;
@@ -752,7 +761,7 @@ static int
 Link(char *buffer, char *url, char *opt, int sockfd)
 {
 	char buf[4096] = {0};
-	int sync = 0, login = 0;
+	int sync = 0, login = 0, ret;
 #ifndef PCS_SUPPORT_GIZP
 	int len;
 	char httpbuf[4096] = {0};
@@ -762,18 +771,24 @@ Link(char *buffer, char *url, char *opt, int sockfd)
 	xml_add_elem(XML_ELEM_START, "baidupcs", NULL, buf);
 	xml_add_elem(XML_ELEM_START, "Link", NULL, buf);
 
-	pcs_web_api_link(&login, &sync);
-	if(login == 0){
-		xml_add_elem(XML_LABEL, "link", "0", buf);
+	ret = pcs_web_api_link(&login, &sync);
+	if(ret == -2){
+		xml_add_elem(XML_LABEL, "errno", "2015002", buf);
+	}else if(ret == -3){
+		xml_add_elem(XML_LABEL, "errno", "2015005", buf);
 	}else{
-		xml_add_elem(XML_LABEL, "link", "1", buf);
+		if(login == 0){
+			xml_add_elem(XML_LABEL, "link", "0", buf);
+		}else{
+			xml_add_elem(XML_LABEL, "link", "1", buf);
+		}
+		if(sync == 0){
+			xml_add_elem(XML_LABEL, "sync", "0", buf);
+		}else{
+			xml_add_elem(XML_LABEL, "sync", "1", buf);
+		}		
+		xml_add_elem(XML_LABEL, "errno", "0", buf);
 	}
-	if(sync == 0){
-		xml_add_elem(XML_LABEL, "sync", "0", buf);
-	}else{
-		xml_add_elem(XML_LABEL, "sync", "1", buf);
-	}
-	xml_add_elem(XML_LABEL, "errno", "0", buf);
 	xml_add_elem(XML_ELEM_END, "Link", NULL, buf);
 	xml_add_elem(XML_ELEM_END, "baidupcs", NULL, buf);
 	xml_add_end(buf);
@@ -1549,7 +1564,6 @@ Pause(char *buffer, char *url, char *opt, int sockfd)
 	char httpbuf[4096] = {0};
 #endif		
 	int havewait = 0, waitnum = 0;
-	char tmpfile[PATH_MAX] = {0};
 	progress_t recing;
 	char *encodbuf = NULL;
 	
@@ -1592,8 +1606,8 @@ Pause(char *buffer, char *url, char *opt, int sockfd)
 		progress_t prg;
 		memset(&prg, 0, sizeof(prg));
 		pcs_web_api_dlprog(&num, &prg);
-		if(strcmp(tmpfile, prg.record.path) != 0){
-			DPRINTF("Wait DownLoad Thread Handle Finish....\n");
+		if(strcmp(path, prg.record.path) != 0){
+			DPRINTF("Wait DownLoad Thread Handle Finish[%s/%s]....\n", path, prg.record.path);
 			break;
 		}
 		usleep(100000);
