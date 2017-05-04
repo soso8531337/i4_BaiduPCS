@@ -1601,7 +1601,7 @@ Pause(char *buffer, char *url, char *opt, int sockfd)
 		goto base_err;
 	}
 
-	while(havewait == 1 && waitnum < 100){
+	while(havewait == 1 && waitnum < 30){
 		int num;
 		progress_t prg;
 		memset(&prg, 0, sizeof(prg));
@@ -1610,7 +1610,7 @@ Pause(char *buffer, char *url, char *opt, int sockfd)
 			DPRINTF("Wait DownLoad Thread Handle Finish[%s/%s]....\n", path, prg.record.path);
 			break;
 		}
-		usleep(100000);
+		usleep(500000);
 		waitnum++;
 	}
 
