@@ -2275,7 +2275,7 @@ void *thread_server(void *arg)
 				context->syncon == 0 || 
 					networkStatus || storageStatus){
 			gettimeofday(&now, NULL);
-			outtime.tv_sec = now.tv_sec + 60;
+			outtime.tv_sec = now.tv_sec + 40;
 			outtime.tv_nsec = now.tv_usec * 1000;					
 			pthread_cond_timedwait(&m_cond, &m_mutex, &outtime);
 			if(networkStatus){
@@ -2343,7 +2343,9 @@ void *thread_down_control(void *arg)
 	webContext *context = (webContext *)(arg);
 	int ret;
 	rec_t task;
-
+	struct timeval now;
+	struct timespec outtime;
+	
 	while(PcsTrue){
 		pthread_mutex_lock(&m_mutex);
 		while(context->islogin == 0 || 
@@ -2351,7 +2353,10 @@ void *thread_down_control(void *arg)
 					networkStatus || storageStatus){
 			printf("Stop Download....\n");
 			downloadStart = 0;
-			pthread_cond_wait(&m_cond, &m_mutex);
+			gettimeofday(&now, NULL);
+			outtime.tv_sec = now.tv_sec + 30;
+			outtime.tv_nsec = now.tv_usec * 1000;					
+			pthread_cond_timedwait(&m_cond, &m_mutex, &outtime);
 		}		
 		downloadStart = 1;
 		printf("Start Download....\n");		
